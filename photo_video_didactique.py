@@ -7,13 +7,18 @@ L'axe horizontal est l'objet central de l'animation :
   - vert  = espace (x, λ, mètres)  ;
   - violet = temps (t, T, secondes) ;
   - rouge = point M suivi simultanément sur les deux panneaux.
-La routine de lecture est affichée en permanence en bas de figure.
+La routine de lecture est affichée dans un bandeau dédié SOUS les
+graphiques (aucune superposition avec l'animation), aux côtés du
+bouton Pause / Reprendre.
 """
+
+import os
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation, PillowWriter
 from matplotlib.patches import ConnectionPatch
+from matplotlib.widgets import Button
 
 # ---------- Paramètres (modifiables) ----------
 A, LAM, T = 2.0, 0.40, 2.0      # amplitude (cm), λ (m), T (s)
@@ -31,7 +36,7 @@ def y(x, t):
 
 # ---------- Figure ----------
 fig, (ax1, ax2) = plt.subplots(
-    1, 2, figsize=(14, 6), gridspec_kw={"width_ratios": [1.1, 1]}
+    1, 2, figsize=(14, 6.5), gridspec_kw={"width_ratios": [1.1, 1]}
 )
 fig.suptitle(
     "Une onde périodique a DEUX périodes : "
@@ -40,6 +45,12 @@ fig.suptitle(
 )
 YLIM = 1.9 * A
 H = 1.35 * A
+
+# Espace réservé aux bandeaux : les graphiques ne descendent jamais
+# sous y = 0.24 de la figure, donc rien ne se superpose à l'animation.
+fig.subplots_adjust(
+    left=0.06, right=0.98, top=0.86, bottom=0.24, wspace=0.25
+)
 
 
 def style_axe_horizontal(ax, couleur, texte):
@@ -114,21 +125,34 @@ lien = ConnectionPatch(
 )
 fig.add_artist(lien)
 
-# ----- Bandeau « routine » -----
+# ----- Bandeau « routine » : zone DÉDIÉE sous les graphiques -----
 fig.text(
-    0.5, 0.015,
+    0.5, 0.115,
     "ROUTINE :  ① Je nomme l'axe horizontal   ②  x (m) → λ    ;    t (s) → T"
     "   ③ Je mesure entre deux motifs identiques",
-    ha="center", fontsize=12, fontweight="bold",
+    ha="center", va="center", fontsize=12, fontweight="bold",
     bbox=dict(boxstyle="round,pad=0.5", fc="lightyellow", ec="goldenrod"),
 )
 
+# ----- Bouton Pause / Reprendre -----
+ax_btn = fig.add_axes([0.42, 0.02, 0.16, 0.06])
+ax_btn.set_facecolor("lightgray")
+btn = Button(ax_btn, "Pause")
+ETAT = {"i": 0, "pause": False}
+
+
+def bascule_pause(event):
+    ETAT["pause"] = not ETAT["pause"]
+    btn.label.set_text("Reprendre" if ETAT["pause"] else "Pause")
+
+
+btn.on_clicked(bascule_pause)
+
 # ---------- Animation ----------
 ts = np.arange(0, T_MAX, 1 / FPS)
-yM_hist = y(X_M, ts)
+yM_hist_full = y(X_M, ts)
 
-
-def update(i):
+def dessine(i):
     t = ts[i]
     corde.set_data(x, y(x, t))
     yM = y(X_M, t)
@@ -143,7 +167,7 @@ def update(i):
     crete1.set_data([x1, x1], [0, H])
     crete2.set_data([x2, x2], [0, H])
 
-    trace.set_data(ts[: i + 1], yM_hist[: i + 1])
+    trace.set_data(ts[: i + 1], yM_hist_full[: i + 1])
     M2.set_data([t], [yM])
     lien.xy1 = (X_M, yM)
     lien.xy2 = (t, yM)
@@ -153,12 +177,34 @@ def update(i):
             a.set_visible(True)
 
 
-ani = FuncAnimation(
-    fig, update, frames=len(ts), interval=1000 / FPS,
-    blit=False, repeat=False,
-)
+def update(_frame):
+    """En pause, l'indice ne progresse plus : l'image est figée."""
+    if not ETAT["pause"]:
+        ETAT["i"] += 1
+        if ETAT["i"] >= len(ts):
+            ETAT["i"] = 0          # reboucle pour la projection en classe
+            for a in arts_T:
+                a.set_visible(False)
+    dessine(ETAT["i"])
+
+
+ani = None
 
 if __name__ == "__main__":
-    plt.close(fig)
-    ani.save("photo_video.gif", writer=PillowWriter(fps=FPS))
-    print("Animation écrite dans photo_video.gif")
+    if os.environ.get("DISPLAY") or os.environ.get("ALLOW_GUI"):
+        ani = FuncAnimation(
+            fig, update, frames=len(ts), interval=1000 / FPS,
+            blit=False, repeat=True,
+        )
+        plt.show()
+    else:
+        # Mode headless : GIF sans gestion de pause (bouton non interactif)
+        def save_update(frame):
+            dessine(frame)
+
+        ani = FuncAnimation(
+            fig, save_update, frames=len(ts),
+            interval=1000 / FPS, blit=False, repeat=False,
+        )
+        ani.save("photo_video.gif", writer=PillowWriter(fps=FPS))
+        print("Animation écrite dans photo_video.gif")
